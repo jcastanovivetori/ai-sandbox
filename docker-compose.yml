@@ -1,0 +1,221 @@
+version: "3.9"
+
+services:
+
+  # =======================
+  # BASE DE DATOS
+  # =======================
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: chatwoot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chatwoot_secure_pass_2024}
+      POSTGRES_DB: chatwoot
+      TZ: ${TIMEZONE:-America/Bogota}
+    command: >
+      postgres
+      -c shared_buffers=64MB
+      -c work_mem=4MB
+      -c maintenance_work_mem=16MB
+      -c effective_cache_size=128MB
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ai_stack
+    mem_limit: 200m
+    shm_size: 64m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatwoot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    environment:
+      TZ: ${TIMEZONE:-America/Bogota}
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_secure_pass_2024} --maxmemory 50mb --maxmemory-policy allkeys-lru --save "" --appendfsync no
+    volumes:
+      - redis_data:/data
+    networks:
+      - ai_stack
+    mem_limit: 64m
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_pass_2024}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  mongo:
+    image: mongo:6.0
+    container_name: mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-librechat}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-mongo_secure_pass_2024}
+      TZ: ${TIMEZONE:-America/Bogota}
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    command: mongod --wiredTigerCacheSizeGB 0.25 --quiet --logpath /dev/null
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - ai_stack
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # =======================
+  # APLICACIONES
+
+  chatwoot:
+    image: chatwoot/chatwoot:latest
+    container_name: chatwoot
+    env_file:
+      - .env.chatwoot
+    environment:
+      - TZ=${TIMEZONE:-America/Bogota}
+      - RAILS_ENV=production
+      - DATABASE_URL=postgresql://chatwoot:${POSTGRES_PASSWORD:-chatwoot_secure_pass_2024}@postgres:5432/chatwoot
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_secure_pass_2024}@redis:6379/0
+      - RAILS_LOG_TO_STDOUT=true
+      - RAILS_MAX_THREADS=3
+      - WEB_CONCURRENCY=1
+      - MALLOC_ARENA_MAX=2
+      - RUBY_GC_HEAP_INIT_SLOTS=100000
+      - RUBY_GC_HEAP_FREE_SLOTS_MIN_RATIO=0.2
+      - RUBY_GC_HEAP_FREE_SLOTS_MAX_RATIO=0.4
+    entrypoint: docker/entrypoints/rails.sh
+    command: ["bundle", "exec", "rails", "s", "-p", "3000", "-b", "0.0.0.0"]
+    networks:
+      - ai_stack
+    mem_limit: 400m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  chatwoot_sidekiq:
+    image: chatwoot/chatwoot:latest
+    container_name: chatwoot_sidekiq
+    env_file:
+      - .env.chatwoot
+    environment:
+      - TZ=${TIMEZONE:-America/Bogota}
+      - RAILS_ENV=production
+      - DATABASE_URL=postgresql://chatwoot:${POSTGRES_PASSWORD:-chatwoot_secure_pass_2024}@postgres:5432/chatwoot
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_secure_pass_2024}@redis:6379/0
+      - MALLOC_ARENA_MAX=2
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+    networks:
+      - ai_stack
+    mem_limit: 300m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: n8n
+    env_file:
+      - .env.n8n
+    environment:
+      - TZ=${TIMEZONE:-America/Bogota}
+      - NODE_OPTIONS=--max-old-space-size=256
+    restart: always
+    volumes:
+      - n8n_data:/home/node/.n8n
+    ports:
+      - "5678:5678"
+    networks:
+      - ai_stack
+    mem_limit: 300m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  librechat:
+    image: ghcr.io/danny-avila/librechat:latest
+    container_name: librechat
+    env_file:
+      - .env.librechat
+    restart: unless-stopped
+    volumes:
+      - librechat-images:/app/client/public/images
+      - librechat-logs:/app/api/logs
+      - librechat-data:/app/api/data
+      - ./librechat.yaml:/app/librechat.yaml:Z
+    networks:
+      - ai_stack
+    mem_limit: 256m
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  # =======================
+  # BRIDGE (Deepnote Connector)
+  # =======================
+
+  bridge:
+    build:
+      context: ./bridge
+      dockerfile: Dockerfile
+    container_name: bridge
+    env_file:
+      - ./bridge/.env
+    restart: unless-stopped
+    networks:
+      - ai_stack
+    mem_limit: 128m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+
+  # =======================
+  # REVERSE PROXY - Nginx
+  # =======================
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+    depends_on:
+      - chatwoot
+      - n8n
+      - librechat
+      - bridge
+    networks:
+      - ai_stack
+    restart: unless-stopped
+
+networks:
+  ai_stack:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  mongo_data:
+  n8n_data:
+  librechat-images:
+  librechat-logs:
+  librechat-data:
