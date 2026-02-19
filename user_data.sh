@@ -96,12 +96,12 @@ echo "[8/10] Cloning repository..."
 sudo mkdir -p /opt
 cd /opt
 
-if [ -d "mvp-aws-ia" ]; then
-    cd mvp-aws-ia
+if [ -d "ai-sandbox" ]; then
+    cd ai-sandbox
     sudo git pull
 else
-    sudo git clone https://github.com/UC-Johan-Andres/mvp-aws-ia.git
-    cd mvp-aws-ia
+    sudo git clone https://github.com/jcastanovivetori/ai-sandbox.git
+    cd ai-sandbox
 fi
 
 # Go to new directory if it exists, otherwise stay in root
@@ -120,7 +120,13 @@ if [ -z "$PUBLIC_IP" ]; then
     PUBLIC_IP="localhost"
 fi
 
+# Subdominios soylideria.com (apuntar DNS a esta instancia / Elastic IP)
+N8N_BASE_URL="http://n8ntest.soylideria.com"
+CHATWOOT_BASE_URL="http://chatwoot.soylideria.com"
+LIBRECHAT_BASE_URL="http://chat.soylideria.com"
+
 echo "Public IP: ${PUBLIC_IP}"
+echo "Subdominios: n8ntest.soylideria.com | chatwoot.soylideria.com | chat.soylideria.com"
 
 echo "[9/10] Downloading parameters from AWS Parameter Store..."
 OPENROUTER_KEY=$(aws ssm get-parameter --name "/ai-ecosystem/openrouter-key" --with-decryption --query "Parameter.Value" --output text 2>/dev/null || echo "")
@@ -160,8 +166,8 @@ JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
 SESSION_SECRET=${SESSION_SECRET}
 ALLOW_REGISTRATION=true
 OPENROUTER_KEY=${OPENROUTER_KEY}
-DOMAIN_CLIENT=http://${PUBLIC_IP}/librechat
-DOMAIN_SERVER=http://${PUBLIC_IP}/librechat
+DOMAIN_CLIENT=${LIBRECHAT_BASE_URL}
+DOMAIN_SERVER=${LIBRECHAT_BASE_URL}
 MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME}
 MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
 EOF
@@ -174,7 +180,7 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DATABASE=chatwoot
 REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
 SECRET_KEY_BASE=${CHATWOOT_SECRET}
-FRONTEND_URL=http://${PUBLIC_IP}/chatwoot
+FRONTEND_URL=${CHATWOOT_BASE_URL}
 WEB_CONCURRENCY=1
 RAILS_MAX_THREADS=1
 EOF
@@ -186,15 +192,15 @@ DB_POSTGRESDB_PORT=5432
 DB_POSTGRESDB_DATABASE=n8n
 DB_POSTGRESDB_USER=n8n
 DB_POSTGRESDB_PASSWORD=${N8N_PASSWORD}
-N8N_HOST=${PUBLIC_IP}
+N8N_HOST=n8ntest.soylideria.com
 N8N_PORT=5678
 N8N_PROTOCOL=http
-N8N_EDITOR_BASE_URL=http://${PUBLIC_IP}
+N8N_EDITOR_BASE_URL=${N8N_BASE_URL}
 NODE_ENV=production
 GENERIC_TIMEZONE=America/Bogota
 N8N_SECURE_COOKIE=false
 N8N_IGNORE_CORS=true
-WEBHOOK_URL=http://${PUBLIC_IP}/
+WEBHOOK_URL=${N8N_BASE_URL}/
 N8N_BASIC_AUTH_ACTIVE=true
 N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
 N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
@@ -277,10 +283,11 @@ echo ""
 echo "Docker storage info:"
 sudo docker system df
 echo ""
-echo "Services available at:"
-echo "  - n8n:       http://${PUBLIC_IP}/n8n/"
-echo "  - LibreChat: http://${PUBLIC_IP}/librechat/"
-echo "  - Chatwoot:  http://${PUBLIC_IP}/chatwoot/"
+echo "Services available at (subdominios):"
+echo "  - n8n:       ${N8N_BASE_URL}"
+echo "  - LibreChat: ${LIBRECHAT_BASE_URL}"
+echo "  - Chatwoot:  ${CHATWOOT_BASE_URL}"
+echo "Por IP (paths):"
 echo "  - Bridge:    http://${PUBLIC_IP}/bridge/"
 echo ""
 echo "To check status: sudo docker-compose ps"

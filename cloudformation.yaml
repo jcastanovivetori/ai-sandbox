@@ -184,10 +184,10 @@ Resources:
         Fn::Base64: !Sub |
           #!/bin/bash
           cd /opt
-          git clone https://github.com/UC-Johan-Andres/mvp-aws-ia.git
-          cd mvp-aws-ia
-          chmod +x new/user_data.sh
-          bash new/user_data.sh
+          git clone https://github.com/jcastanovivetori/ai-sandbox.git
+          cd ai-sandbox
+          chmod +x user_data.sh
+          bash user_data.sh
       Tags:
         - Key: Name
           Value: !Sub AI-Ecosystem-EC2
